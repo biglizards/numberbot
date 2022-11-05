@@ -135,7 +135,7 @@ async def get_stats_again(ctx, option):
 
 async def get_stats_if_required(option):
     # getting stats takes a few seconds, even for single messages
-    # allowing every call would be wasteful (and spam the log)
+    # allowing every call would be wasteful, as they would overlap
     # but using a simple lock means if someone sends two messages quickly, we miss the second one
     # thus, we limit at most one task to be waiting on the lock
     table, channel_id, convert_to_int = \
@@ -164,7 +164,6 @@ async def get_stats_inner(table, channel_id, convert_to_int):
             pass
     if not messages:
         return
-    print(len(messages), messages[:10])
     c.executemany('INSERT INTO {} VALUES (?,?,?)'.format(table), messages)
     database.commit()
 
