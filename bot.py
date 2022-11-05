@@ -53,7 +53,7 @@ def letters_to_int(word):
         for i, char in enumerate(reversed(word)):
             t += letter_values[char.lower()] * 26 ** i
         return t
-    except AttributeError:
+    except (AttributeError, KeyError):
         return 0
 
 
