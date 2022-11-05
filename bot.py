@@ -117,6 +117,7 @@ async def true_get_stats_again(option):
         [('fib', fibonacci_id, int), ('bin', binary_id, lambda x: int(x, 2)), ('letters', letters_id, letters_to_int)][
             int(option)]
     messages = []
+    last_num = int(open("numb_bin", "r").read(), 2) if option == 1 else int(open("numb_letters", "r").read())
     limit = c.execute('SELECT num FROM {} ORDER BY num DESC LIMIT 1'.format(table)).fetchone()
     if not limit:
         limit = (0,)
@@ -125,7 +126,8 @@ async def true_get_stats_again(option):
             int_message = convert_to_int(message.content)
             if int_message <= limit[0]:
                 break
-            messages.append((int_message, str(message.author.id), message.created_at))
+            if limit[0] < int_message <= last_num:
+                messages.append((int_message, str(message.author.id), message.created_at))
         except ValueError:
             pass
     if not messages: return
