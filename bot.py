@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import asyncio
 import operator
 import os
 import sqlite3
@@ -27,7 +28,7 @@ async def binary(message):
         await message.delete()
         return
     open("numb_bin", "w").write(message.content)
-    await true_get_stats_again(1)
+    await get_stats_if_required(1)
 
 
 async def fib(message):
@@ -62,7 +63,26 @@ async def letters(message):
         await message.delete()
         return
     open("numb_letters", "w").write(str(last_num + 1))
-    await true_get_stats_again(2)
+    await get_stats_if_required(2)
+
+
+class RetryLock(asyncio.Lock):
+    """Lock that tells you if anyone else is waiting on it. Useful for preventing overlapping fetches"""
+    def __init__(self):
+        super().__init__()
+        self.has_waiting = False
+
+    async def acquire(self):
+        if self.locked():
+            self.has_waiting = True
+        return await super().acquire()
+
+    def release(self) -> None:
+        self.has_waiting = False
+        super().release()
+
+    def should_acquire(self):
+        return not self.has_waiting
 
 
 real_path = os.path.dirname(os.path.realpath(__file__)) + "/"
@@ -70,6 +90,7 @@ os.chdir(real_path)
 
 database = sqlite3.connect("stats.db")
 c = database.cursor()
+channel_locks = {name: RetryLock() for name in ['fib', 'letters', 'bin']}
 
 c.execute('''CREATE TABLE IF NOT EXISTS edits
              (id int, num int)''')
@@ -109,15 +130,26 @@ async def get_stats():
 
 @bot.command(hidden=True)
 async def get_stats_again(ctx, option):
-    await true_get_stats_again(option)
+    await get_stats_if_required(option)
 
 
-async def true_get_stats_again(option):
+async def get_stats_if_required(option):
+    # getting stats takes a few seconds, even for single messages
+    # allowing every call would be wasteful (and spam the log)
+    # but using a simple lock means if someone sends two messages quickly, we miss the second one
+    # thus, we limit at most one task to be waiting on the lock
     table, channel_id, convert_to_int = \
         [('fib', fibonacci_id, int), ('bin', binary_id, lambda x: int(x, 2)), ('letters', letters_id, letters_to_int)][
             int(option)]
+    lock = channel_locks[table]
+    if lock.should_acquire():
+        async with lock:
+            await get_stats_inner(table, channel_id, convert_to_int)
+
+
+async def get_stats_inner(table, channel_id, convert_to_int):
     messages = []
-    last_num = int(open("numb_bin", "r").read(), 2) if option == 1 else int(open("numb_letters", "r").read())
+    last_num = int(open("numb_bin", "r").read(), 2) if table == 'bin' else int(open("numb_letters", "r").read())
     limit = c.execute('SELECT num FROM {} ORDER BY num DESC LIMIT 1'.format(table)).fetchone()
     if not limit:
         limit = (0,)
@@ -130,7 +162,8 @@ async def true_get_stats_again(option):
                 messages.append((int_message, str(message.author.id), message.created_at))
         except ValueError:
             pass
-    if not messages: return
+    if not messages:
+        return
     print(len(messages), messages[:10])
     c.executemany('INSERT INTO {} VALUES (?,?,?)'.format(table), messages)
     database.commit()
